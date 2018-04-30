@@ -25,10 +25,13 @@ class CleanDataTask(luigi.Task):
                 try:
                     tweet_id = row[17]
                     tweet_coord = row[15]
-                    # _unit_id,_golden,_unit_state,_trusted_judgments,_last_judgment_at,airline_sentiment,airline_sentiment:confidence,negativereason,negativereason:confidence,airline,airline_sentiment_gold,name,negativereason_gold,retweet_count,text,tweet_coord,tweet_created,tweet_id,tweet_location,user_timezone = row
-
-                    if re.match('[\[]([-]?[0-9]+[.]?[0-9]+)[\s,]+([-]?[0-9]+[.]?[0-9]+)[\]]', tweet_coord):
-                        data = data + [row]
+                    res = re.search('[\[]([-]?[0-9]+[.]?[0-9]+)[\s,]+([-]?[0-9]+[.]?[0-9]+)[\]]', tweet_coord)
+                    if res is not None:
+                        coordX = res.group(1)
+                        coordY = res.group(2)
+                        if coordX != 0 and coordY != 0:
+                            row.extend(coordX, coordY)
+                            data = data + [row]
                 except:
                     traceback.print_exc()
         with self.output().open('w') as out_file:
@@ -47,8 +50,18 @@ class TrainingDataTask(luigi.Task):
     cities_file = luigi.Parameter(default='cities.csv')
     output_file = luigi.Parameter(default='features.csv')
 
-    # TODO...
+    def output(self):
+        return luigi.LocalTarget(self.output_file)
+    
+    def requires(self):
+        return CleanDataTask(tweet_file)
 
+    def run(self):
+        # clean it
+        for t in self.input():
+            with t.open('r') as in_file:
+                for line in in_file:
+        pass
 
 class TrainModelTask(luigi.Task):
     """ Trains a classifier to predict negative, neutral, positive
