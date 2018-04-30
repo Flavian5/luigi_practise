@@ -1,6 +1,9 @@
 """ Rubikloud take home problem """
 import luigi
-
+import csv
+import re
+import traceback
+from collections import defaultdict
 
 class CleanDataTask(luigi.Task):
     """ Cleans the input CSV file by removing any rows without valid geo-coordinates.
@@ -11,8 +14,27 @@ class CleanDataTask(luigi.Task):
     tweet_file = luigi.Parameter()
     output_file = luigi.Parameter(default='clean_data.csv')
 
-    # TODO...
+    def output(self):
+        return luigi.LocalTarget(self.output_file)
 
+    def run(self):
+        data = []
+        with open(self.tweet_file, 'rU') as in_file:
+            reader = csv.reader(in_file, delimiter=",", quoting=False)
+            for row in reader:
+                try:
+                    tweet_id = row[17]
+                    tweet_coord = row[15]
+                    # _unit_id,_golden,_unit_state,_trusted_judgments,_last_judgment_at,airline_sentiment,airline_sentiment:confidence,negativereason,negativereason:confidence,airline,airline_sentiment_gold,name,negativereason_gold,retweet_count,text,tweet_coord,tweet_created,tweet_id,tweet_location,user_timezone = row
+
+                    if re.match('[\[]([-]?[0-9]+[.]?[0-9]+)[\s,]+([-]?[0-9]+[.]?[0-9]+)[\]]', tweet_coord):
+                        data = data + [row]
+                except:
+                    traceback.print_exc()
+        with self.output().open('w') as out_file:
+            writer = csv.writer(out_file, delimiter=",")
+            for row in data:
+                writer.writerow(row)
 
 class TrainingDataTask(luigi.Task):
     """ Extracts features/outcome variable in preparation for training a model.
