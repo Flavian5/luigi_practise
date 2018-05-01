@@ -4,6 +4,8 @@ import csv
 import re
 import traceback
 from collections import defaultdict
+import operator
+import pandas as pd
 
 class CleanDataTask(luigi.Task):
     """ Cleans the input CSV file by removing any rows without valid geo-coordinates.
@@ -27,10 +29,10 @@ class CleanDataTask(luigi.Task):
                     tweet_coord = row[15]
                     res = re.search('[\[]([-]?[0-9]+[.]?[0-9]+)[\s,]+([-]?[0-9]+[.]?[0-9]+)[\]]', tweet_coord)
                     if res is not None:
-                        coordX = res.group(1)
-                        coordY = res.group(2)
+                        coordX = float(res.group(1))
+                        coordY = float(res.group(2))
                         if coordX != 0 and coordY != 0:
-                            row.extend(coordX, coordY)
+                            row.extend([coordX, coordY])
                             data = data + [row]
                 except:
                     traceback.print_exc()
@@ -54,14 +56,42 @@ class TrainingDataTask(luigi.Task):
         return luigi.LocalTarget(self.output_file)
     
     def requires(self):
-        return CleanDataTask(tweet_file)
+        return CleanDataTask(self.tweet_file)
 
     def run(self):
-        # clean it
-        for t in self.input():
-            with t.open('r') as in_file:
-                for line in in_file:
-        pass
+        cities = pd.read_csv(self.cities_file, delimiter=",")
+        data = []
+
+        with self.input().open('r') as in_file:
+            reader = csv.reader(in_file, delimiter=",", quoting=False)
+            try:
+                for row in reader:
+                    # determine the X (city) value
+                    coordX = row[-2]
+                    coordY = row[-1]
+                    xdiffs = [(float(coordX) - float(x))**2 for x in cities['latitude'].tolist()]
+                    ydiffs = [(float(coordY) - float(y))**2 for y in cities['longitude'].tolist()]
+                    l2 = [xdiffs[i] + ydiffs[i] for i in range(len(xdiffs))]
+                    
+                    min_index, min_value = min(enumerate(l2), key=operator.itemgetter(1))
+                    city = cities.loc[min_index]['asciiname']
+                    # determine the Y (sentiment) value
+                    airline_sentiment = row[5]
+                    sentiment = 2
+                    if airline_sentiment == 'neutral':
+                        sentiment = 1
+                    elif airline_sentiment == 'negative':
+                        sentiment = 0
+                    row.extend([city, sentiment])
+                    data = data + [row]                        
+            except:
+                traceback.print_exc()
+    
+        with self.output().open('w') as out_file:
+            writer = csv.writer(out_file, delimiter=",")
+            for row in data:
+                writer.writerow(row)
+
 
 class TrainModelTask(luigi.Task):
     """ Trains a classifier to predict negative, neutral, positive
