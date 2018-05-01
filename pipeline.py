@@ -6,6 +6,9 @@ import traceback
 from collections import defaultdict
 import operator
 import pandas as pd
+from sklearn import tree
+import pickle
+from sklearn.preprocessing import OneHotEncoder, LabelEncoder
 
 class CleanDataTask(luigi.Task):
     """ Cleans the input CSV file by removing any rows without valid geo-coordinates.
@@ -24,18 +27,15 @@ class CleanDataTask(luigi.Task):
         with open(self.tweet_file, 'rU') as in_file:
             reader = csv.reader(in_file, delimiter=",", quoting=False)
             for row in reader:
-                try:
-                    tweet_id = row[17]
-                    tweet_coord = row[15]
-                    res = re.search('[\[]([-]?[0-9]+[.]?[0-9]+)[\s,]+([-]?[0-9]+[.]?[0-9]+)[\]]', tweet_coord)
-                    if res is not None:
-                        coordX = float(res.group(1))
-                        coordY = float(res.group(2))
-                        if coordX != 0 and coordY != 0:
-                            row.extend([coordX, coordY])
-                            data = data + [row]
-                except:
-                    traceback.print_exc()
+                tweet_id = row[17]
+                tweet_coord = row[15]
+                res = re.search('[\[]([-]?[0-9]+[.]?[0-9]+)[\s,]+([-]?[0-9]+[.]?[0-9]+)[\]]', tweet_coord)
+                if res is not None:
+                    coordX = float(res.group(1))
+                    coordY = float(res.group(2))
+                    if coordX != 0 and coordY != 0:
+                        row.extend([coordX, coordY])
+                        data = data + [row]
         with self.output().open('w') as out_file:
             writer = csv.writer(out_file, delimiter=",")
             for row in data:
@@ -64,28 +64,25 @@ class TrainingDataTask(luigi.Task):
 
         with self.input().open('r') as in_file:
             reader = csv.reader(in_file, delimiter=",", quoting=False)
-            try:
-                for row in reader:
-                    # determine the X (city) value
-                    coordX = row[-2]
-                    coordY = row[-1]
-                    xdiffs = [(float(coordX) - float(x))**2 for x in cities['latitude'].tolist()]
-                    ydiffs = [(float(coordY) - float(y))**2 for y in cities['longitude'].tolist()]
-                    l2 = [xdiffs[i] + ydiffs[i] for i in range(len(xdiffs))]
-                    
-                    min_index, min_value = min(enumerate(l2), key=operator.itemgetter(1))
-                    city = cities.loc[min_index]['asciiname']
-                    # determine the Y (sentiment) value
-                    airline_sentiment = row[5]
-                    sentiment = 2
-                    if airline_sentiment == 'neutral':
-                        sentiment = 1
-                    elif airline_sentiment == 'negative':
-                        sentiment = 0
-                    row.extend([city, sentiment])
-                    data = data + [row]                        
-            except:
-                traceback.print_exc()
+            for row in reader:
+                # determine the X (city) value
+                coordX = row[-2]
+                coordY = row[-1]
+                xdiffs = [(float(coordX) - float(x))**2 for x in cities['latitude'].tolist()]
+                ydiffs = [(float(coordY) - float(y))**2 for y in cities['longitude'].tolist()]
+                l2 = [xdiffs[i] + ydiffs[i] for i in range(len(xdiffs))]
+                
+                min_index, min_value = min(enumerate(l2), key=operator.itemgetter(1))
+                city = cities.loc[min_index]['asciiname']
+                # determine the Y (sentiment) value
+                airline_sentiment = row[5]
+                sentiment = 2
+                if airline_sentiment == 'neutral':
+                    sentiment = 1
+                elif airline_sentiment == 'negative':
+                    sentiment = 0
+                row.extend([city, sentiment])
+                data = data + [row]                        
     
         with self.output().open('w') as out_file:
             writer = csv.writer(out_file, delimiter=",")
@@ -101,9 +98,38 @@ class TrainModelTask(luigi.Task):
     """
     tweet_file = luigi.Parameter()
     output_file = luigi.Parameter(default='model.pkl')
+    cities_file = luigi.Parameter(default='cities.csv')
 
-    # TODO...
+    def output(self):
+        return luigi.LocalTarget(self.output_file)
 
+    def requires(self):
+        return TrainingDataTask(self.tweet_file)
+    
+    def run(self):
+        X = []
+        y = []
+        cities = pd.read_csv(self.cities_file, delimiter=",")
+
+        with self.input().open('r') as in_file:
+            try:
+                reader = csv.reader(in_file, delimiter=",", quoting=False)
+                for row in reader:
+                    X = X + [row[-2]]
+                    y= y + [int(row[-1])]
+                enc = OneHotEncoder()
+                le = LabelEncoder()
+                le.fit(cities['asciiname'].tolist())
+                new_X = le.transform(X)
+                enc.fit(new_X.reshape(-1, 1))
+                X_one_hot = enc.transform(new_X.reshape(-1, 1))
+                clf = tree.DecisionTreeClassifier()
+                clf = clf.fit(X_one_hot, y)
+            except:
+                traceback.print_exc()
+
+        with self.output().open('w') as out_file:
+            pickle.dump(clf, out_file)
 
 class ScoreTask(luigi.Task):
     """ Uses the scored model to compute the sentiment for each city.
@@ -115,10 +141,33 @@ class ScoreTask(luigi.Task):
         - positive probability
     """
     tweet_file = luigi.Parameter()
+    cities_file = luigi.Parameter(default='cities.csv')
     output_file = luigi.Parameter(default='scores.csv')
 
-    # TODO...
+    def output(self):
+        return luigi.LocalTarget(self.output_file)
+    
+    def requires(self):
+        return TrainModelTask(self.tweet_file)
+    
+    def run(self):
+        # generate cities to be scored
+        cities = pd.read_csv(self.cities_file, delimiter=",")
 
+        with self.input().open('r') as in_file:
+            clf = pickle.load(in_file)
+            X = cities['asciiname'].tolist()
+            enc = OneHotEncoder()
+            le = LabelEncoder()
+            le.fit(X)
+            new_X = le.transform(X)
+            enc.fit(new_X.reshape(-1, 1))
+            X_one_hot = enc.transform(new_X.reshape(-1, 1))
+            predictions = clf.predict(X_one_hot)
+        print(predictions)
+        print(type(predictions))
+        # scored_df = 
+        # with self.output().open('w') as out_file:
 
 if __name__ == "__main__":
     luigi.run()
