@@ -4,3 +4,5 @@
 /share
 pip-selfcheck.json
 /local
+*.csv
+*.pkl
