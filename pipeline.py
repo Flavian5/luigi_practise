@@ -24,12 +24,12 @@ class CleanDataTask(luigi.Task):
 
     def run(self):
         data = []
-        with open(self.tweet_file, 'rU') as in_file:
+        with open(self.tweet_file, 'rU') as in_file: # standard 'r' option does not work with my system
             reader = csv.reader(in_file, delimiter=",", quoting=False)
             for row in reader:
                 tweet_id = row[17]
                 tweet_coord = row[15]
-                res = re.search('[\[]([-]?[0-9]+[.]?[0-9]+)[\s,]+([-]?[0-9]+[.]?[0-9]+)[\]]', tweet_coord)
+                res = re.search('[\[]([-]?[0-9]+[.]?[0-9]+)[\s,]+([-]?[0-9]+[.]?[0-9]+)[\]]', tweet_coord) # using regex to filter tweet_coord
                 if res is not None:
                     coordX = float(res.group(1))
                     coordY = float(res.group(2))
@@ -70,9 +70,9 @@ class TrainingDataTask(luigi.Task):
                 coordY = row[-1]
                 xdiffs = [(float(coordX) - float(x))**2 for x in cities['latitude'].tolist()]
                 ydiffs = [(float(coordY) - float(y))**2 for y in cities['longitude'].tolist()]
-                l2 = [xdiffs[i] + ydiffs[i] for i in range(len(xdiffs))]
+                l2 = [xdiffs[i] + ydiffs[i] for i in range(len(xdiffs))] # Iterating over entire city list
                 
-                min_index, min_value = min(enumerate(l2), key=operator.itemgetter(1))
+                min_index, min_value = min(enumerate(l2), key=operator.itemgetter(1)) # Find closest city
                 city = cities.loc[min_index]['asciiname']
                 # determine the Y (sentiment) value
                 airline_sentiment = row[5]
@@ -120,15 +120,15 @@ class TrainModelTask(luigi.Task):
                 enc = OneHotEncoder()
                 le = LabelEncoder()
                 le.fit(cities['asciiname'].tolist())
-                new_X = le.transform(X)
-                all_cities = le.transform(cities['asciiname'].tolist())
-                enc.fit(all_cities.reshape(-1, 1))
-                X_one_hot = enc.transform(new_X.reshape(-1, 1))
-                clf = tree.DecisionTreeClassifier()
+                new_X = le.transform(X) # Replace all cities in training data with labels
+                all_cities = le.transform(cities['asciiname'].tolist()) 
+                enc.fit(all_cities.reshape(-1, 1)) # Fit one-hot transformation scheme with full city list
+                X_one_hot = enc.transform(new_X.reshape(-1, 1)) # Transform training data city labels to one-hot vectors
+                clf = tree.DecisionTreeClassifier() # Decision tree model
                 clf = clf.fit(X_one_hot, y)
             except:
-                traceback.print_exc()
-
+                traceback.print_exc() 
+                
         with self.output().open('w') as out_file:
             pickle.dump(clf, out_file)
 
@@ -166,10 +166,6 @@ class ScoreTask(luigi.Task):
             X_one_hot = enc.transform(new_X.reshape(-1, 1))
             predictions = clf.predict(X_one_hot)
             probs = clf.predict_proba(X_one_hot)
-        # print(len(predictions))
-        # print(predictions)
-        # print(len(probs))
-        # print(probs)
 
         with self.output().open('w') as out_file:
             df = pd.DataFrame(probs, columns=['negative', 'neutral', 'positive'])
