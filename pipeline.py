@@ -6,9 +6,9 @@ import traceback
 from collections import defaultdict
 import operator
 import pandas as pd
-from sklearn import tree
 import pickle
 from sklearn.preprocessing import OneHotEncoder, LabelEncoder
+from sklearn.linear_model import LogisticRegression
 
 class CleanDataTask(luigi.Task):
     """ Cleans the input CSV file by removing any rows without valid geo-coordinates.
@@ -121,10 +121,13 @@ class TrainModelTask(luigi.Task):
                 le = LabelEncoder()
                 le.fit(cities['asciiname'].tolist())
                 new_X = le.transform(X)
-                enc.fit(new_X.reshape(-1, 1))
+                all_cities = le.transform(cities['asciiname'].tolist())
+                enc.fit(all_cities.reshape(-1, 1))
                 X_one_hot = enc.transform(new_X.reshape(-1, 1))
-                clf = tree.DecisionTreeClassifier()
-                clf = clf.fit(X_one_hot, y)
+                clf = LogisticRegression()
+                clf.fit(X_one_hot, y)
+                # clf = tree.DecisionTreeClassifier()
+                # clf = clf.fit(X_one_hot, y)
             except:
                 traceback.print_exc()
 
@@ -164,8 +167,7 @@ class ScoreTask(luigi.Task):
             enc.fit(new_X.reshape(-1, 1))
             X_one_hot = enc.transform(new_X.reshape(-1, 1))
             predictions = clf.predict(X_one_hot)
-        print(predictions)
-        print(type(predictions))
+        print(len(predictions))
         # scored_df = 
         # with self.output().open('w') as out_file:
 
